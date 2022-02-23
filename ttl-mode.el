@@ -1,4 +1,4 @@
-;;; ttl-mode.el --- mode for Turtle (and Notation 3)
+;;; ttl-mode.el --- mode for Turtle (and Notation 3) -*- lexical-binding: t -*-
 ;; ttl-mode.el is released under the terms of the two-clause BSD licence:
 ;;
 ;; Copyright 2003-2007, Hugo Haas <http://www.hugoh.net>
@@ -68,7 +68,7 @@
   "If non-nil, `\;' or `\.' will self insert, reindent the line, and do a newline. (To insert while t, do: \\[quoted-insert] \;)."
   :type 'boolean)
 
-(defcustom ttl-indent-on-idle-timer t
+(defcustom ttl-indent-on-idle-timer nil
   "If non-nil, will automatically indent a line after `ttl-idle-timer-timeout'."
   :type 'boolean)
 
@@ -76,15 +76,23 @@
   "If `ttl-indent-on-idle-timer' is non-nil, indent after EMACS has been idle for this many seconds."
   :type 'integer)
 
+(defcustom ttl-hungry nil
+  "Use `ttl-hungry-delete' when editing."
+  :type 'boolean)
 
-(defvar ttl-indent-idle-timer nil "TTL-mode autoindent idle timer if idle auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
+(defvar ttl-indent-idle-timer nil
+  "TTL-mode autoindent idle timer if idle.
+Auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
 
 ;;;###autoload
 (define-derived-mode ttl-mode prog-mode "N3/Turtle mode"
   "Major mode for Turtle RDF documents."
 
   ;; Comments syntax
-  (set (make-local-variable 'comment-start) " # ")
+  (setq-local comment-start "#")
+  (setq-local comment-add 1)
+  (setq-local comment-start-skip "#+ *")
+  (setq-local font-lock-comment-start-skip "#+ *")
   (modify-syntax-entry ?\n "> " ttl-mode-syntax-table)
   (modify-syntax-entry ?\' "\"" ttl-mode-syntax-table)
   ;; fontification
@@ -101,9 +109,9 @@
            ("[,;.]" 0 font-lock-keyword-face))))
   
   ;; indentation
-  (set (make-local-variable 'indent-line-function) 'ttl-indent-line)
-  (set (make-local-variable 'indent-tabs-mode) nil)
-  (set (make-local-variable 'syntax-propertize-function) 'ttl-propertize-comments)
+  (setq-local indent-line-function 'ttl-indent-line)
+  (setq-local indent-tabs-mode nil)
+  (setq-local syntax-propertize-function 'ttl-propertize-comments)
   (setq show-trailing-whitespace t)
   (if (and ttl-indent-on-idle-timer (not ttl-indent-idle-timer))
       (setq ttl-indent-idle-timer (run-with-idle-timer ttl-indent-idle-timer-period t 'ttl-idle-indent))
@@ -115,7 +123,8 @@
 (define-key ttl-mode-map (kbd "\;") 'ttl-electric-semicolon)
 (define-key ttl-mode-map (kbd "\,") 'ttl-electric-comma)
 (define-key ttl-mode-map (kbd "\.") 'ttl-electric-dot)
-(define-key ttl-mode-map [backspace] 'ttl-hungry-delete-backwards)
+(when ttl-hungry
+  (define-key ttl-mode-map [backspace] 'ttl-hungry-delete-backwards t))
 
 
 ;; Could be replaced with a call to syntax-propertize-rules. See
@@ -130,7 +139,7 @@
 			    (max (point-min) (- (point) 2))
 			    (min (point-max) (- (point) 1)))))
 	  (when (or (equal char-before " ")
-		    (equal char-before "\n"))
+		        (equal char-before "\n"))
 	    (put-text-property (match-beginning 0) (match-end 0) 'syntax-table '(11))))))))
 
 (defun ttl-indent-line ()
@@ -151,35 +160,80 @@
   (save-excursion
     (backward-to-indentation 0)
     (cl-destructuring-bind
-	(last-indent last-character after-prefix)
-	(save-excursion (ttl-skip-uninteresting-lines) (list (current-indentation) (char-before) (ttl-in-prefix-line)))
+        (last-indent last-character after-prefix)
+        (save-excursion (ttl-skip-uninteresting-lines) (list (current-indentation) (char-before) (ttl-in-prefix-line)))
       (let* ((syntax-info (syntax-ppss))
-	     (base-indent (* ttl-indent-level (ttl-adjusted-paren-depth (nth 9 syntax-info)))))
-	(cond
-	 ;; in multiline string
-	 ((nth 3 syntax-info) (current-indentation))
-	 ;; First line in buffer.
-	 ((= (line-number-at-pos (point) t) 1) 0)
-	 ;; beginning of stanza
-	 ((and (or (looking-at "@")         ; @prefix, @base, @keywords.
-		   (looking-at "PREFIX")
-		   (looking-at "BASE"))
-	       (not (looking-at "\\(@forSome\\)\\|\\(@forAll\\)"))) ; @forAll and @forSome should be indented normally.
-	  0)
-	 ;; ((looking-at "#") base-indent)
-	 ((looking-at "[])}]")		; Indent to level of matching parenthesis.
-	  (save-excursion
-	    (goto-char (nth 1 syntax-info))
-	    (current-indentation)))
-	 ((and (not (bobp))
-               (or (ttl-first-line-of ?\[ last-character)
-                   (ttl-first-line-of ?\( last-character)
-                   (ttl-first-line-of ?\{ last-character)))
-	  (+ last-indent ttl-indent-level))
-	 ((eq ?. last-character) base-indent)
+             (base-indent (* ttl-indent-level 2 (ttl-adjusted-paren-depth (nth 9 syntax-info)))))
+        (cond
+         ;; in multiline string
+         ((nth 3 syntax-info) (current-indentation))
+         ;; First line in buffer.
+         ((= (line-number-at-pos (point) t) 1) 0)
+         ;; beginning of stanza
+         ((and (or (looking-at "@")         ; @prefix, @base, @keywords.
+                   (looking-at "PREFIX")
+                   (looking-at "BASE"))
+               (not (looking-at "\\(@forSome\\)\\|\\(@forAll\\)"))) ; @forAll and @forSome should be indented normally.
+          0)
+         ;; ((looking-at "#") base-indent)
+         ((looking-at "[])}]")		; Indent to level of matching parenthesis.
+          (save-excursion
+            (goto-char (nth 1 syntax-info))
+            (current-indentation)))
+         ((and nil (not (bobp))
+               (or
+                (ttl-first-line-of ?\[ last-character)
+                (ttl-first-line-of ?\( last-character)
+                (ttl-first-line-of ?\{ last-character)
+                (save-excursion
+                  (re-search-backward
+                   "^.+[[][^]]*\\|[(][^)]*\\|[{][^}]*$" ; FIXME whitespace only vs non whitespace prefix
+                   (save-excursion (re-search-backward "^.+$" nil t))
+                   t))))
+          (let ((whitespace-only-prefix (save-excursion
+                                          (previous-line)
+                                          (let ((end (point)))
+                                            (beginning-of-line)
+                                            (re-search-forward "^[\t ]*[[]\\|[(]\\|[{]$" end t)))))
+            (+ last-indent (* (if whitespace-only-prefix 1 2) ttl-indent-level))))
+         ((save-excursion
+            (previous-logical-line)
+            (previous-logical-line)
+            (end-of-line)
+            (let ((last-1 (eq (char-before) ?,)))
+              (next-logical-line)
+              (end-of-line)
+              (let ((last-2 (eq (char-before) ?,)))
+                (and (not last-1) last-2))))
+          (+ last-indent ttl-indent-level))
+         ;; FIXME horribly inefficient to do these checks twice
+         ((save-excursion
+            (previous-logical-line)
+            (end-of-line)
+            (eq (char-before) ?,))
+          last-indent)
+         ((and (not (bobp))
+               (save-excursion
+                 (and
+                  (re-search-backward
+                   "^.+[[][^]]*\\|[(][^)]*\\|[{][^}]*$"
+                   (save-excursion (re-search-backward "^.+$" nil t))
+                   t)
+                  (not (ttl-in-string)))))
+          (let ((whitespace-only-prefix
+                 (save-excursion
+                   (previous-logical-line)
+                   (let ((end (point)))
+                     (beginning-of-line)
+                     (re-search-forward "^[\t ]*[[]\\|[(]\\|[{]$" end t)))))
+            (+ last-indent (* (if whitespace-only-prefix 1 2) ttl-indent-level))))
+         ;; FIXME one lingering difference with someValuesFrom x ] ; lines
+         ;; in =G case where we try to indent the whole buffer ... doesn't trigger on <tab> though?
+         ;; FIXME performance is HORRIBLE for whole buffer reindents
+         ((eq ?. last-character) base-indent)
          (after-prefix 0)
          ((ttl-in-blank-node) base-indent)
-	 (last-character (+ base-indent ttl-indent-level)))))))
+         (last-character (+ base-indent ttl-indent-level)))))))
 
 (defun ttl-adjusted-paren-depth (parenpos)
   "Calculate parenthesis depth from PARENPOS, ignoring parentheses on the same line."
@@ -204,7 +258,7 @@
            (string-match (rx (and string-start (* blank) line-end)) (thing-at-point 'line))))
     (forward-line -1))
   ;; Then, go to last non-comment-character
-  (if (search-forward " #" (point-at-eol) t)
+  (if (search-forward " #" (point-at-eol) t) ; FIXME match here is incorrect
       (backward-char 2)
     (end-of-line)))
   
