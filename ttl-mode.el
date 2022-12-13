@@ -57,6 +57,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'python)
 
 (defgroup ttl nil "Customization for ttl-mode" :group 'text)
 
@@ -89,12 +90,15 @@ Auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
   "Major mode for Turtle RDF documents."
 
   ;; Comments syntax
-  (setq-local comment-start "#")
-  (setq-local comment-add 1)
-  (setq-local comment-start-skip "#+ *")
-  (setq-local font-lock-comment-start-skip "#+ *")
-  (modify-syntax-entry ?\n "> " ttl-mode-syntax-table)
+  (modify-syntax-entry ?\# "<" ttl-mode-syntax-table)
+  (modify-syntax-entry ?\n ">" ttl-mode-syntax-table)
   (modify-syntax-entry ?\' "\"" ttl-mode-syntax-table)
+  (modify-syntax-entry ?\" "\"" ttl-mode-syntax-table) ; XXX for some reason escaped single quotes are not ignored in strings
+  ;; required for compact forms to work correctly
+  (modify-syntax-entry ?\: "_" ttl-mode-syntax-table)
+  (modify-syntax-entry ?\. "_" ttl-mode-syntax-table)
+  (modify-syntax-entry ?\\ "\\" ttl-mode-syntax-table)
+  (modify-syntax-entry ?\/ "_" ttl-mode-syntax-table)
   ;; fontification
   (setq font-lock-defaults
         `((,(regexp-opt '("@prefix" "@base" "@keywords" "PREFIX" "BASE" "@forAll" "@forSome" "true" "false" "a") 'symbols)  ;keywords
@@ -102,8 +106,8 @@ Auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
 	   ("\\?[[:word:]_]+" 0 font-lock-variable-name-face) ;Existentially quantified variables
            ("@[[:word:]_]+" . font-lock-preprocessor-face) ;languages
 	   ; Does not work with iris containing multiple colons (one:two:three is apparently allowed.)
-           ("\\(:?[-[:alnum:]]+\\|_\\)?:" . font-lock-type-face)       ;prefix
-           (":\\([[:word:]_-]+\\)\\>" 1 font-lock-constant-face nil) ;suffix
+           ("\\(:?[-_[:alnum:].]+\\|_\\)?:" . font-lock-type-face)       ;prefix
+           (":\\([[:word:]\\\\/_-]+\\)\\_>" 1 font-lock-constant-face nil) ;suffix
 	   ;; TODO: This incorrectly highlights resources in strings.
            ("<.*?>" 0 font-lock-function-name-face t) ;resources
            ("[,;.]" 0 font-lock-keyword-face))))
@@ -111,7 +115,8 @@ Auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
   ;; indentation
   (setq-local indent-line-function 'ttl-indent-line)
   (setq-local indent-tabs-mode nil)
-  (setq-local syntax-propertize-function 'ttl-propertize-comments)
+  (setq-local syntax-propertize-function
+              python-syntax-propertize-function)
   (setq show-trailing-whitespace t)
   (if (and ttl-indent-on-idle-timer (not ttl-indent-idle-timer))
       (setq ttl-indent-idle-timer (run-with-idle-timer ttl-indent-idle-timer-period t 'ttl-idle-indent))
@@ -125,22 +130,6 @@ Auto indentation is used (`ttl-indent-on-idle-timer' is non-nil).")
 (define-key ttl-mode-map (kbd "\.") 'ttl-electric-dot)
 (when ttl-hungry
   (define-key ttl-mode-map [backspace] 'ttl-hungry-delete-backwards t))
-
-
-;; Could be replaced with a call to syntax-propertize-rules. See
-;; https://emacs.stackexchange.com/questions/36909/how-can-i-make-syntax-propertize-skip-part-of-the-buffer
-(defun ttl-propertize-comments (start end)
-  "Set the syntax class to `comment-start` for all hashes that are prepended by a space between START and END."
-  (save-excursion
-    (goto-char start)
-    (save-match-data
-      (while (search-forward "#" end t)
-	(let ((char-before (buffer-substring-no-properties
-			    (max (point-min) (- (point) 2))
-			    (min (point-max) (- (point) 1)))))
-	  (when (or (equal char-before " ")
-		        (equal char-before "\n"))
-	    (put-text-property (match-beginning 0) (match-end 0) 'syntax-table '(11))))))))
 
 (defun ttl-indent-line ()
   "Indent current line."
